@@ -2,6 +2,7 @@
 """Send 1,000 requests over HTTP/1.1 keep-alive connections to a tsn server."""
 
 import socket
+import signal
 import subprocess
 import sys
 import time
@@ -9,7 +10,7 @@ import time
 PORT = 24875
 REQUESTS = 1000
 PER_CONNECTION = 100
-REQUEST = b"GET / HTTP/1.1\r\n\r\n"
+REQUEST = b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
 BODY = b'{"ok":true}'
 
 
@@ -55,9 +56,10 @@ def main() -> int:
                     time.sleep(0.01)
             with client:
                 client.settimeout(3)
-                client.sendall(REQUEST * PER_CONNECTION)
                 for _ in range(PER_CONNECTION):
+                    client.sendall(REQUEST)
                     recv_response(client)
+        process.send_signal(signal.SIGTERM)
         elapsed = time.perf_counter() - start
         status = process.wait(timeout=3)
         if status != 0:
