@@ -26,12 +26,12 @@ were both compiled with the same Clang `-O3 -march=native -fwrapv` IR pass and
 
 | Runner | Median elapsed | Maximum peak RSS |
 |---|---:|---:|
-| C | 0.213570 s | 612 KiB |
-| tsn | 0.201381 s | 548 KiB |
-| Bun (informational) | 2.099188 s | 58,940 KiB |
+| C | 0.243172 s | 612 KiB |
+| tsn | 0.230883 s | 548 KiB |
+| Bun (informational) | 2.219807 s | 58,812 KiB |
 
-C sample standard deviation was 0.018137 s. The tsn median was 0.012189 s
-faster than the C median (about 1.06× C throughput), within one C standard
+C sample standard deviation was 0.039383 s. The tsn median was 0.012289 s
+faster than the C median (about 1.05× C throughput), within one C standard
 deviation. Peak RSS was 0.895× C. Thus the throughput and RSS portions of the
 revised M1 gate pass for this measured workload. Raw samples, exact relative
 commands, output, input hash, and environment are recorded in

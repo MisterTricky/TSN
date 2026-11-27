@@ -23,6 +23,22 @@ The script checks correctness before timing. It prints a checksum and elapsed
 milliseconds, but those values are machine/runtime-specific and are not saved
 as claimed results. Keep compiler build time outside the timed loop.
 
+The early tsn source-core implementation lives in `service.tsn.ts`. To compare
+the same 100,000-request fixture workload on Linux, build tsn first, then run
+from the repository root:
+
+```sh
+cargo run -p tsn -- compile benchmarks/service-m5/service.tsn.ts -o target/m5-service
+python3 benchmarks/service-m5/measure.py \
+  --bun "bun run benchmarks/service-m5/run.ts 100000" \
+  --tsn target/m5-service --runs 10
+```
+
+This is a source-core microbenchmark, not the M5 HTTP service acceptance run.
+It compares the programs' internal timed loops after their fixture checks,
+reports total process time and peak RSS separately, and makes no 2x Bun, p99,
+cold-start, binary-size, or soak claim.
+
 ## Work performed per request
 
 `service.ts` parses a three-segment JWT-like token; validates canonical

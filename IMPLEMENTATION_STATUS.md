@@ -23,13 +23,25 @@ because Oxc can parse its syntax.
 | General arrays / slices / generic collections | Not implemented |
 | Strings | UTF-8 literal/views, byte-based `.length`, content equality, checked `sliceUtf8`/`stringByteAt`, `printString`, concatenation, and source-level `stdlib/strings.ts::contains`; concatenated bytes are process-owned and released at standalone exit/trap, not yet request-scoped; builders and broad string APIs are absent |
 | Objects / classes / generics / unions | Not implemented |
-| Errors / async / per-request scopes / cancellation | OOB traps recover at standalone `main` and release tracked buffers; typed language errors and per-request/server scopes are not implemented |
+| Errors / async / per-request scopes / cancellation | OOB traps recover at standalone `main` and release tracked buffers; SIGINT/SIGTERM flag and bounded thread spawn/wait are present, but typed errors, request arenas, cancellation tokens, and async/task APIs are absent |
 | Raw pointers / unsafe | Deferred by decision; not part of the current v0 implementation path |
 | Standalone Linux executable | Implemented for the supported subset; static ELF with a source-defined `main()` |
 | libc/target baseline | Currently statically linked against the WSL distro's libc with `-march=native`; musl and portable CPU baseline are not yet implemented |
 | Backend | Oxc AST → typed-ish C intermediate → Clang/LLVM IR and native link; direct LLVM IR lowering is future work |
-| Stdlib/platform packages | `tsn:time` / `monotonicMs`; `tsn:io` scalar output and `readStdin`; minimal `tsn:net` TCP primitives; source utilities `stdlib/bytes.ts` (FNV-1a/equality), `stdlib/strings.ts` (`contains`), `stdlib/base64.ts` (base64url decode), `stdlib/crypto.ts` (SHA-256/HMAC-SHA-256 test-vector prototypes), and `stdlib/http.ts` smoke parser. `tsn:bench` remains benchmark-only; general HTTP/JSON and thread pool are absent. |
+| Stdlib/platform packages | `tsn:time` / `monotonicMs`; `tsn:io` scalar output and `readStdin`; minimal `tsn:net` TCP primitives; `tsn:os` signal flag and bounded thread spawn; source utilities in `stdlib/` cover bytes, strings, base64url, SHA-256/HMAC, fixed-schema JSON, service core, and a bounded HTTP parser. General HTTP/JSON, typed errors, and task runtime remain incomplete. `tsn:bench` remains benchmark-only. |
 | Runtime support | Typed-buffer allocator/check/free and standalone trap boundary; no reusable general-purpose runtime library yet |
+
+## Current milestone evidence
+
+- M3 constrained HTTP fixture: a 10-minute, four-worker WSL2 run completed
+  6,129,355 requests at 10,215.6 req/s with zero request errors; p99 was
+  0.957 ms versus 0.944 ms for the matching Bun fixture. See
+  `benchmarks/http-m3/RESULTS.md`. This does not establish general HTTP
+  conformance, and the run did not signal during a deliberately in-flight
+  request, so graceful in-flight completion remains unverified.
+- M5 remains incomplete: the service-core fixture is not a networked API and
+  its measured throughput was about 1.08x Bun, below the documented 2x target;
+  cold-start, binary-size, p99, and one-hour soak gates remain unverified.
 
 Current diagnostic categories: `TSN1000` parser, `TSN1301` loose equality,
 `TSN2001` spanned type error, `TSN2000` other subset/semantic rejection, and

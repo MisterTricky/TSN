@@ -507,6 +507,7 @@ fn validate_c_source(input: &str, source: &str, generated: &str) -> Result<(), D
             "c",
             "-fsyntax-only",
             "-fwrapv",
+            "-pthread",
             "-Wall",
             "-Wextra",
             "-Werror",
@@ -586,6 +587,7 @@ pub(crate) fn compile_module(input: &str, output: &str) -> Result<(), Diagnostic
             "-O3",
             "-march=native",
             "-fwrapv",
+            "-pthread",
             "-Wall",
             "-Wextra",
             "-Werror",
@@ -619,7 +621,7 @@ pub(crate) fn compile_module(input: &str, output: &str) -> Result<(), Diagnostic
         ));
     }
     let status = Command::new("clang")
-        .args(["-O0", "-march=native", "-fwrapv", "-static"])
+        .args(["-O0", "-march=native", "-fwrapv", "-pthread", "-static"])
         .arg(&ir_path)
         .arg("-o")
         .arg(output)
@@ -704,6 +706,8 @@ fn emit_c_modules(
                             ("tsn:net", "writeTcp") => Builtin::WriteTcp,
                             ("tsn:net", "writeTcpString") => Builtin::WriteTcpString,
                             ("tsn:net", "closeTcp") => Builtin::CloseTcp,
+                            ("tsn:os", "shutdownRequested") => Builtin::ShutdownRequested,
+                            ("tsn:os", "spawnThread") => Builtin::SpawnThread,
                             ("tsn:bench", "printBenchmark") => Builtin::PrintBenchmark,
                             _ => {
                                 return Err(format!(
@@ -864,8 +868,9 @@ fn emit_c_modules(
     }
     generated.push_str(
         "\nint main(void) {\n\
-         if (setjmp(tsn_trap_env) != 0) { tsn_trap_active = 0; tsn_cleanup_all(); fputs(\"error[TSN3002]: Uint8Array index out of bounds\\n\", stderr); return 1; }\n\
-         tsn_trap_active = 1; int result = (int)tsn_main(); tsn_trap_active = 0; tsn_cleanup_all(); return result;\n}\n",
+         tsn_install_signals();\n\
+         if (setjmp(tsn_trap_env) != 0) { tsn_trap_active = 0; tsn_shutdown_flag = 1; tsn_wait_workers(); tsn_cleanup_all(); fputs(\"error[TSN3002]: Uint8Array index out of bounds\\n\", stderr); return 1; }\n\
+         tsn_trap_active = 1; int result = (int)tsn_main(); tsn_trap_active = 0; tsn_shutdown_flag = 1; tsn_wait_workers(); tsn_cleanup_all(); return result;\n}\n",
     );
     Ok(generated)
 }
@@ -919,6 +924,8 @@ fn emit_c_source(source: &str, program: &oxc_ast::ast::Program<'_>) -> Result<St
                         ("tsn:net", "writeTcp") => Builtin::WriteTcp,
                         ("tsn:net", "writeTcpString") => Builtin::WriteTcpString,
                         ("tsn:net", "closeTcp") => Builtin::CloseTcp,
+                        ("tsn:os", "shutdownRequested") => Builtin::ShutdownRequested,
+                        ("tsn:os", "spawnThread") => Builtin::SpawnThread,
                         ("tsn:bench", "printBenchmark") => Builtin::PrintBenchmark,
                         _ => {
                             return Err(format!(
@@ -1001,8 +1008,9 @@ fn emit_c_source(source: &str, program: &oxc_ast::ast::Program<'_>) -> Result<St
     }
     generated.push_str(
         "\nint main(void) {\n\
-         if (setjmp(tsn_trap_env) != 0) { tsn_trap_active = 0; tsn_cleanup_all(); fputs(\"error[TSN3002]: Uint8Array index out of bounds\\n\", stderr); return 1; }\n\
-         tsn_trap_active = 1; int result = (int)tsn_main(); tsn_trap_active = 0; tsn_cleanup_all(); return result;\n}\n",
+         tsn_install_signals();\n\
+         if (setjmp(tsn_trap_env) != 0) { tsn_trap_active = 0; tsn_shutdown_flag = 1; tsn_wait_workers(); tsn_cleanup_all(); fputs(\"error[TSN3002]: Uint8Array index out of bounds\\n\", stderr); return 1; }\n\
+         tsn_trap_active = 1; int result = (int)tsn_main(); tsn_trap_active = 0; tsn_shutdown_flag = 1; tsn_wait_workers(); tsn_cleanup_all(); return result;\n}\n",
     );
     Ok(generated)
 }
@@ -1049,6 +1057,8 @@ enum Builtin {
     WriteTcp,
     WriteTcpString,
     CloseTcp,
+    ShutdownRequested,
+    SpawnThread,
     PrintBenchmark,
 }
 
@@ -1219,7 +1229,7 @@ impl<'s> CEmitter<'s> {
     }
 
     fn preamble(&self) -> String {
-        "#include <stdint.h>\n#include <inttypes.h>\n#include <stdio.h>\n#include <time.h>\n#include <stdlib.h>\n#include <setjmp.h>\n#include <string.h>\n#include <errno.h>\n#include <sys/types.h>\n#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <unistd.h>\n\
+        "#include <stdint.h>\n#include <inttypes.h>\n#include <stdio.h>\n#include <time.h>\n#include <stdlib.h>\n#include <setjmp.h>\n#include <string.h>\n#include <errno.h>\n#include <signal.h>\n#include <pthread.h>\n#include <sys/types.h>\n#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <unistd.h>\n\
          _Static_assert(INT8_MIN == -128 && INT8_MAX == 127, \"tsn requires two's-complement i8\");\n\
          _Static_assert(INT16_MIN == -32768 && INT16_MAX == 32767, \"tsn requires two's-complement i16\");\n\
          static inline __attribute__((unused)) int8_t tsn_i8_wrap(int32_t value) { uint8_t bits = (uint8_t)value; int8_t result; memcpy(&result, &bits, sizeof(result)); return result; }\n\
@@ -1232,9 +1242,18 @@ impl<'s> CEmitter<'s> {
          typedef struct TsnWordArray { uint32_t len; uint32_t *data; struct TsnWordArray *next; } TsnWordArray;\n\
          typedef struct { uint32_t len; const uint8_t *data; } TsnString;\n\
          typedef struct TsnOwnedString { uint8_t *data; struct TsnOwnedString *next; } TsnOwnedString;\n\
-         static jmp_buf tsn_trap_env; static int tsn_trap_active = 0; static TsnByteArray *tsn_live_buffers = NULL; static TsnWordArray *tsn_live_words = NULL; static TsnOwnedString *tsn_live_strings = NULL;\n\
+         static _Thread_local jmp_buf tsn_trap_env; static _Thread_local int tsn_trap_active = 0; static _Thread_local TsnByteArray *tsn_live_buffers = NULL; static _Thread_local TsnWordArray *tsn_live_words = NULL; static _Thread_local TsnOwnedString *tsn_live_strings = NULL;\n\
+         static volatile sig_atomic_t tsn_shutdown_flag = 0;\n\
+         static inline __attribute__((unused)) void tsn_signal_handler(int signal_number) { (void)signal_number; tsn_shutdown_flag = 1; }\n\
+         static inline __attribute__((unused)) void tsn_install_signals(void) { struct sigaction action; memset(&action, 0, sizeof(action)); action.sa_handler = tsn_signal_handler; sigemptyset(&action.sa_mask); action.sa_flags = 0; (void)sigaction(SIGINT, &action, NULL); (void)sigaction(SIGTERM, &action, NULL); }\n\
+         static inline __attribute__((unused)) _Bool tsn_shutdown_requested(void) { return tsn_shutdown_flag != 0; }\n\
+         typedef void (*TsnWorkerFn)(int32_t); typedef struct { TsnWorkerFn function; int32_t argument; } TsnWorkerArg;\n\
+         static pthread_mutex_t tsn_workers_mutex = PTHREAD_MUTEX_INITIALIZER; static pthread_cond_t tsn_workers_cond = PTHREAD_COND_INITIALIZER; static uint32_t tsn_workers_active = 0;\n\
          static inline __attribute__((unused,noreturn)) void tsn_bounds_fail(void) { if (tsn_trap_active) longjmp(tsn_trap_env, 1); fputs(\"fatal TSN bounds trap outside main scope\\n\", stderr); abort(); }\n\
          static inline __attribute__((unused)) void tsn_cleanup_all(void) { while (tsn_live_buffers) { TsnByteArray *a = tsn_live_buffers; tsn_live_buffers = a->next; free(a->data); free(a); } while (tsn_live_words) { TsnWordArray *a = tsn_live_words; tsn_live_words = a->next; free(a->data); free(a); } while (tsn_live_strings) { TsnOwnedString *s = tsn_live_strings; tsn_live_strings = s->next; free(s->data); free(s); } }\n\
+         static inline __attribute__((unused)) void *tsn_worker_start(void *opaque) { TsnWorkerArg *argument = (TsnWorkerArg *)opaque; TsnWorkerFn function = argument->function; int32_t value = argument->argument; free(argument); if (setjmp(tsn_trap_env) == 0) { tsn_trap_active = 1; function(value); } tsn_trap_active = 0; tsn_cleanup_all(); (void)pthread_mutex_lock(&tsn_workers_mutex); tsn_workers_active--; (void)pthread_cond_broadcast(&tsn_workers_cond); (void)pthread_mutex_unlock(&tsn_workers_mutex); return NULL; }\n\
+         static inline __attribute__((unused)) int32_t tsn_spawn_thread(TsnWorkerFn function, int32_t argument) { (void)pthread_mutex_lock(&tsn_workers_mutex); if (tsn_workers_active >= 128 || tsn_shutdown_flag) { (void)pthread_mutex_unlock(&tsn_workers_mutex); return -1; } TsnWorkerArg *context = malloc(sizeof(*context)); if (!context) { (void)pthread_mutex_unlock(&tsn_workers_mutex); return -1; } context->function = function; context->argument = argument; pthread_t thread; tsn_workers_active++; int status = pthread_create(&thread, NULL, tsn_worker_start, context); if (status != 0) { tsn_workers_active--; free(context); (void)pthread_cond_broadcast(&tsn_workers_cond); (void)pthread_mutex_unlock(&tsn_workers_mutex); return -1; } (void)pthread_detach(thread); (void)pthread_mutex_unlock(&tsn_workers_mutex); return 0; }\n\
+         static inline __attribute__((unused)) void tsn_wait_workers(void) { (void)pthread_mutex_lock(&tsn_workers_mutex); while (tsn_workers_active != 0) (void)pthread_cond_wait(&tsn_workers_cond, &tsn_workers_mutex); (void)pthread_mutex_unlock(&tsn_workers_mutex); }\n\
          static inline __attribute__((unused)) TsnByteArray *tsn_u8_array_new(uint32_t len) { TsnByteArray *a = malloc(sizeof(*a)); if (!a) abort(); a->len = len; a->data = calloc((size_t)len, sizeof(uint8_t)); if (len != 0 && !a->data) abort(); a->next = tsn_live_buffers; tsn_live_buffers = a; return a; }\n\
          static inline __attribute__((unused)) TsnWordArray *tsn_u32_array_new(uint32_t len) { TsnWordArray *a = malloc(sizeof(*a)); if (!a) abort(); a->len = len; a->data = calloc((size_t)len, sizeof(uint32_t)); if (len != 0 && !a->data) abort(); a->next = tsn_live_words; tsn_live_words = a; return a; }\n\
          static inline __attribute__((unused)) uint32_t tsn_u32_get(TsnWordArray *a, uint32_t i) { if (i >= a->len) tsn_bounds_fail(); return a->data[i]; }\n\
@@ -1251,8 +1270,8 @@ impl<'s> CEmitter<'s> {
          static inline __attribute__((unused)) void tsn_print_string(TsnString value) { fwrite(value.data, 1, value.len, stdout); fputc(10, stdout); }\n\
          static inline __attribute__((unused)) uint32_t tsn_read_stdin(TsnByteArray *buffer) { if (buffer->len == 0) return 0; size_t count = fread(buffer->data, 1, (size_t)buffer->len, stdin); if (count == 0 && ferror(stdin)) return UINT32_MAX; return (uint32_t)count; }\n\
          static inline __attribute__((unused)) int32_t tsn_listen_tcp(uint16_t port, _Bool loopback) { int fd = socket(AF_INET, SOCK_STREAM, 0); if (fd < 0) return -1; int yes = 1; if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, (socklen_t)sizeof(yes)) < 0) { (void)close(fd); return -1; } struct sockaddr_in address; memset(&address, 0, sizeof(address)); address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(loopback ? INADDR_LOOPBACK : INADDR_ANY); address.sin_port = htons(port); if (bind(fd, (struct sockaddr *)&address, (socklen_t)sizeof(address)) < 0 || listen(fd, 128) < 0) { (void)close(fd); return -1; } return (int32_t)fd; }\n\
-         static inline __attribute__((unused)) int32_t tsn_accept_tcp(int32_t listener) { int fd; do { fd = accept(listener, NULL, NULL); } while (fd < 0 && errno == EINTR); return (int32_t)fd; }\n\
-         static inline __attribute__((unused)) uint32_t tsn_read_tcp(int32_t fd, TsnByteArray *buffer, uint32_t offset) { if (offset > buffer->len) return UINT32_MAX; if (offset == buffer->len) return 0; size_t len = (size_t)(buffer->len - offset); if (len > (size_t)INT32_MAX) len = (size_t)INT32_MAX; ssize_t count; do { count = read(fd, buffer->data + offset, len); } while (count < 0 && errno == EINTR); if (count < 0) return UINT32_MAX; return (uint32_t)count; }\n\
+         static inline __attribute__((unused)) int32_t tsn_accept_tcp(int32_t listener) { int fd; do { fd = accept(listener, NULL, NULL); } while (fd < 0 && errno == EINTR && !tsn_shutdown_flag); return (int32_t)fd; }\n\
+         static inline __attribute__((unused)) uint32_t tsn_read_tcp(int32_t fd, TsnByteArray *buffer, uint32_t offset) { if (offset > buffer->len) return UINT32_MAX; if (offset == buffer->len) return 0; size_t len = (size_t)(buffer->len - offset); if (len > (size_t)INT32_MAX) len = (size_t)INT32_MAX; ssize_t count; do { count = read(fd, buffer->data + offset, len); } while (count < 0 && errno == EINTR && !tsn_shutdown_flag); if (count < 0 && errno == EINTR && tsn_shutdown_flag) return 0; if (count < 0) return UINT32_MAX; return (uint32_t)count; }\n\
          static inline __attribute__((unused)) uint32_t tsn_write_tcp(int32_t fd, TsnByteArray *buffer, uint32_t offset) { if (offset > buffer->len) return UINT32_MAX; size_t len = (size_t)(buffer->len - offset); if (len == 0) return 0; ssize_t count; do { count = send(fd, buffer->data + offset, len, MSG_NOSIGNAL); } while (count < 0 && errno == EINTR); if (count < 0) return UINT32_MAX; return (uint32_t)count; }\n\
          static inline __attribute__((unused)) uint32_t tsn_write_tcp_string(int32_t fd, TsnString value, uint32_t offset) { if (offset > value.len) return UINT32_MAX; size_t len = (size_t)(value.len - offset); if (len == 0) return 0; ssize_t count; do { count = send(fd, value.data + offset, len, MSG_NOSIGNAL); } while (count < 0 && errno == EINTR); if (count < 0) return UINT32_MAX; return (uint32_t)count; }\n\
          static inline __attribute__((unused)) int32_t tsn_close_tcp(int32_t fd) { return (int32_t)close(fd); }\n\
@@ -2313,6 +2332,41 @@ impl<'s> CEmitter<'s> {
                 Ok(CType::I32)
             }
             Some(Builtin::CloseTcp) => Err("closeTcp expects one i32 descriptor".into()),
+            Some(Builtin::ShutdownRequested) if call.arguments.is_empty() => Ok(CType::Bool),
+            Some(Builtin::ShutdownRequested) => {
+                Err("shutdownRequested expects no arguments".into())
+            }
+            Some(Builtin::SpawnThread) if call.arguments.len() == 2 => {
+                let worker = call.arguments[0]
+                    .as_expression()
+                    .and_then(|expr| match expr {
+                        Expression::Identifier(identifier) => Some(identifier.name.as_str()),
+                        _ => None,
+                    })
+                    .ok_or("spawnThread expects a named worker function")?;
+                let target = self
+                    .call_targets
+                    .get(worker)
+                    .ok_or_else(|| format!("unknown worker function `{worker}`"))?;
+                let signature = self
+                    .functions
+                    .get(target)
+                    .ok_or_else(|| format!("unknown worker function `{worker}`"))?;
+                if signature.return_type != CType::Void
+                    || signature.params.len() != 1
+                    || signature.params[0].1 != CType::I32
+                {
+                    return Err(
+                        "spawnThread worker must have signature `function(i32): void`".into(),
+                    );
+                }
+                let argument = call.arguments[1]
+                    .as_expression()
+                    .ok_or("spread arguments are unsupported")?;
+                self.ensure_assignable(argument, CType::I32, "spawnThread argument")?;
+                Ok(CType::I32)
+            }
+            Some(Builtin::SpawnThread) => Err("spawnThread expects (worker, i32 argument)".into()),
             None => {
                 let target = self
                     .call_targets
@@ -2449,6 +2503,18 @@ impl<'s> CEmitter<'s> {
                 } else {
                     Ok(format!("({left} {op} {right})"))
                 }
+            }
+            Expression::LogicalExpression(logical) => {
+                let operator = match logical.operator {
+                    LogicalOperator::And => "&&",
+                    LogicalOperator::Or => "||",
+                    _ => return Err("unsupported logical operator".into()),
+                };
+                Ok(format!(
+                    "({} {operator} {})",
+                    self.expression(&logical.left)?,
+                    self.expression(&logical.right)?
+                ))
             }
             Expression::ParenthesizedExpression(paren) => {
                 Ok(format!("({})", self.expression(&paren.expression)?))
@@ -2871,6 +2937,33 @@ impl<'s> CEmitter<'s> {
                 ))
             }
             Some(Builtin::CloseTcp) => Err("closeTcp expects one argument".into()),
+            Some(Builtin::ShutdownRequested) if call.arguments.is_empty() => {
+                Ok("tsn_shutdown_requested()".into())
+            }
+            Some(Builtin::ShutdownRequested) => {
+                Err("shutdownRequested expects no arguments".into())
+            }
+            Some(Builtin::SpawnThread) if call.arguments.len() == 2 => {
+                let worker = call.arguments[0]
+                    .as_expression()
+                    .and_then(|expr| match expr {
+                        Expression::Identifier(identifier) => Some(identifier.name.as_str()),
+                        _ => None,
+                    })
+                    .ok_or("spawnThread expects a named worker function")?;
+                let target = self
+                    .call_targets
+                    .get(worker)
+                    .ok_or_else(|| format!("unknown worker function `{worker}`"))?;
+                let argument = call.arguments[1]
+                    .as_expression()
+                    .ok_or("spread arguments are unsupported")?;
+                Ok(format!(
+                    "tsn_spawn_thread(tsn_{target}, (int32_t)({}))",
+                    self.expression(argument)?
+                ))
+            }
+            Some(Builtin::SpawnThread) => Err("spawnThread expects two arguments".into()),
             None => {
                 let target = self
                     .call_targets
@@ -3029,7 +3122,7 @@ mod tests {
 
     #[test]
     fn resolves_tcp_platform_primitives() {
-        let source = "import { listenTcp, acceptTcp, readTcp, writeTcpString, closeTcp } from \"tsn:net\"; function main(): i32 { const listener: i32 = listenTcp(8080, true); const connection: i32 = acceptTcp(listener); const buffer: Uint8Array = new Uint8Array(16); const count: u32 = readTcp(connection, buffer, 0); const written: u32 = writeTcpString(connection, \"ok\", 0); closeTcp(connection); closeTcp(listener); return 0; }";
+        let source = "import { listenTcp, acceptTcp, readTcp, writeTcpString, closeTcp } from \"tsn:net\"; import { shutdownRequested } from \"tsn:os\"; function main(): i32 { if (shutdownRequested()) return 1; const listener: i32 = listenTcp(8080, true); const connection: i32 = acceptTcp(listener); const buffer: Uint8Array = new Uint8Array(16); const count: u32 = readTcp(connection, buffer, 0); const written: u32 = writeTcpString(connection, \"ok\", 0); closeTcp(connection); closeTcp(listener); return 0; }";
         let generated =
             lower(source).expect("socket operations should be host-boundary primitives");
         assert!(generated.contains("tsn_listen_tcp((uint16_t)(8080), 1)"));
@@ -3037,6 +3130,16 @@ mod tests {
         assert!(generated.contains("tsn_read_tcp((int32_t)(connection), buffer, (uint32_t)(0))"));
         assert!(generated.contains("tsn_write_tcp_string"));
         assert!(generated.contains("tsn_close_tcp"));
+        assert!(generated.contains("tsn_shutdown_requested()"));
+    }
+
+    #[test]
+    fn lowers_bounded_thread_spawn_for_named_worker() {
+        let source = "import { spawnThread } from \"tsn:os\"; function worker(value: i32): void { const ignored: i32 = value; } function main(): i32 { const status: i32 = spawnThread(worker, 7); return status; }";
+        let generated = lower(source).expect("named i32 workers should be spawnable");
+        assert!(generated.contains("void tsn_worker(int32_t value)"));
+        assert!(generated.contains("tsn_spawn_thread(tsn_worker, (int32_t)(7))"));
+        assert!(generated.contains("tsn_wait_workers()"));
     }
 
     #[test]

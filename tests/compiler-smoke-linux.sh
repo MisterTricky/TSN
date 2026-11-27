@@ -34,8 +34,18 @@ printf 'ABCD' | "$out/stdin"
 "$compiler" compile "$root/examples/tcp-echo-once.ts" -o "$out/tcp-echo-once"
 python3 "$root/tests/tcp-smoke-linux.py" "$out/tcp-echo-once"
 
+"$compiler" compile "$root/examples/thread-smoke.ts" -o "$out/thread-smoke"
+thread_output=$("$out/thread-smoke")
+if [[ "$thread_output" != "7" ]]; then
+  echo "unexpected thread smoke output: $thread_output" >&2
+  exit 1
+fi
+
 "$compiler" compile "$root/examples/http-once.ts" -o "$out/http-once"
 python3 "$root/tests/http-smoke-linux.py" "$out/http-once"
+
+"$compiler" compile "$root/examples/http-parser.ts" -o "$out/http-parser"
+"$out/http-parser"
 
 "$compiler" compile "$root/examples/http-keepalive.ts" -o "$out/http-keepalive"
 python3 "$root/tests/http-load-linux.py" "$out/http-keepalive"
@@ -92,7 +102,7 @@ fi
 
 "$compiler" compile "$root/benchmarks/service-m5/service.tsn.ts" -o "$out/service-m5"
 m5_output=$("$out/service-m5")
-if [[ "$m5_output" != "44540000" ]]; then
+if [[ "$m5_output" != $'44540000\n'* ]]; then
   echo "unexpected M5 source-service checksum: $m5_output" >&2
   exit 1
 fi

@@ -146,13 +146,57 @@ fn diagnostics(uri: &str, source: &str) -> Value {
         .diagnostics
         .iter()
         .map(|diagnostic| {
+            let span = diagnostic.labels.first().map(|label| label.span());
+            let (start, end) = if let Some(span) = span {
+                (
+                    lsp_position(source, span.start),
+                    lsp_position(source, span.end),
+                )
+            } else {
+                (
+                    json!({"line":0,"character":0}),
+                    json!({"line":0,"character":0}),
+                )
+            };
             json!({
-                "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
+                "range":{"start":start,"end":end},
                 "severity":1,"source":"tsn","message":diagnostic.to_string()
             })
         })
         .collect();
     json!({"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":uri,"diagnostics":items}})
+}
+
+fn lsp_position(source: &str, byte_offset: u32) -> Value {
+    let limit = (byte_offset as usize).min(source.len());
+    let mut cursor = 0usize;
+    let mut line = 0u32;
+    let mut character = 0u32;
+    while cursor < limit {
+        let Some(ch) = source[cursor..].chars().next() else {
+            break;
+        };
+        match ch {
+            '\r' => {
+                cursor += 1;
+                if cursor < limit && source[cursor..].starts_with('\n') {
+                    cursor += 1;
+                }
+                line += 1;
+                character = 0;
+            }
+            '\n' | '\u{2028}' | '\u{2029}' => {
+                cursor += ch.len_utf8();
+                line += 1;
+                character = 0;
+            }
+            _ => {
+                cursor += ch.len_utf8();
+                character += ch.len_utf16() as u32;
+            }
+        }
+    }
+    json!({"line":line,"character":character})
 }
 
 #[cfg(test)]
@@ -194,5 +238,14 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn lsp_positions_use_utf16_characters_and_line_endings() {
+        assert_eq!(
+            lsp_position("α\r\nline", 4),
+            json!({"line":1,"character":0})
+        );
+        assert_eq!(lsp_position("a😀b", 5), json!({"line":0,"character":3}));
     }
 }

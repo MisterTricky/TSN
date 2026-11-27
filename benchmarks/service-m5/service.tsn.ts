@@ -2,7 +2,8 @@ import { handleFixtureRequest } from "../../stdlib/m5-service.ts";
 import { utf8ToBytes } from "../../stdlib/strings.ts";
 import { equalsAscii } from "../../stdlib/format.ts";
 import { sliceUtf8 } from "tsn:strings";
-import { printU32 } from "tsn:io";
+import { printF64, printU32 } from "tsn:io";
+import { monotonicMs } from "tsn:time";
 
 function checksumOne(token: string, body: Uint8Array, bodyLength: u32, now: u32, key: Uint8Array, fields: Uint32Array, response: Uint8Array): u32 {
   const status: i32 = handleFixtureRequest(token, body, bodyLength, now, key, fields, response);
@@ -40,6 +41,7 @@ function main(): i32 {
   if (handleFixtureRequest(expired, validBody, validBody.length, now, key, fields, response) !== 401) return 7;
   if (handleFixtureRequest(token, invalidBody, invalidBody.length, now, key, fields, response) !== 400) return 8;
 
+  const started: f64 = monotonicMs();
   let checksum: u32 = 0;
   let iteration: u32 = 0;
   let caseIndex: u32 = 0;
@@ -54,6 +56,8 @@ function main(): i32 {
     if (caseIndex === 5) caseIndex = 0;
   }
   if (checksum !== 44540000) return 9;
+  const elapsed_ms: f64 = monotonicMs() - started;
   printU32(checksum);
+  printF64(elapsed_ms);
   return 0;
 }
