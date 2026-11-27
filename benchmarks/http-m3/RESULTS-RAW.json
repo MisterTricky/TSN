@@ -1,0 +1,42 @@
+{
+  "platform": "Linux-6.18.58.1-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+  "workload": {
+    "endpoint": "GET / HTTP/1.1 with Host: localhost; 11-byte JSON response",
+    "workers": 4,
+    "keep_alive_requests_per_connection": 100,
+    "duration_seconds": 600,
+    "errors": 0
+  },
+  "commands": {
+    "tsn": "TSN_BIN=target/linux-cargo/debug/tsn M3_SOAK_SECONDS=600 M3_SOAK_WORKERS=4 bash tests/m3-soak-linux.sh",
+    "Bun": "python3 tests/http-load-m3-linux.py --server 'target/bun/bin/bun run benchmarks/http-m3/bun-server.ts' --duration-seconds 600 --workers 4"
+  },
+  "results": {
+    "tsn": {
+      "requests": 6129355,
+      "elapsed_seconds": 600.001,
+      "requests_per_second": 10215.6,
+      "p50_ms": 0.352,
+      "p99_ms": 0.957,
+      "errors": 0,
+      "peak_rss_kib": 888,
+      "shutdown_exit_status": 0
+    },
+    "Bun": {
+      "requests": 6867420,
+      "elapsed_seconds": 600.002,
+      "requests_per_second": 11445.7,
+      "p50_ms": 0.301,
+      "p99_ms": 0.944,
+      "errors": 0,
+      "peak_rss_kib": 40648,
+      "shutdown_exit_status": 0
+    }
+  },
+  "comparison": {
+    "tsn_to_bun_p99_ratio": 1.0138,
+    "p99_within_2x_gate": true,
+    "request_rate_over_1000_per_second": true
+  },
+  "caveat": "SIGTERM was sent after the timed workers finished; clean shutdown was verified, but this run does not prove completion of a request deliberately held in flight at shutdown."
+}
