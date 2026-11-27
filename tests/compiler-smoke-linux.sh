@@ -79,6 +79,13 @@ if [[ "$division_output" != $'3.5\n-3.5' ]]; then
   exit 1
 fi
 
+"$compiler" compile "$root/examples/conditional-expression.ts" -o "$out/conditional-expression"
+conditional_output=$("$out/conditional-expression")
+if [[ "$conditional_output" != "7" ]]; then
+  echo "unexpected conditional expression output: $conditional_output" >&2
+  exit 1
+fi
+
 "$compiler" compile "$root/examples/stdlib-bytes.ts" -o "$out/stdlib-bytes"
 stdlib_bytes_output=$("$out/stdlib-bytes")
 if [[ "$stdlib_bytes_output" != "3289118412" ]]; then

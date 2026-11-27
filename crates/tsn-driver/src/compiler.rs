@@ -1933,6 +1933,25 @@ impl<'s> CEmitter<'s> {
                 }
                 Ok(CType::Bool)
             }
+            Expression::ConditionalExpression(conditional) => {
+                let test_type = self.infer_expression_type(&conditional.test)?;
+                if test_type != CType::Bool {
+                    return Err(marked_type_error(
+                        Some(conditional.test.span()),
+                        "conditional expression test must be boolean",
+                    ));
+                }
+                let consequent = self.infer_expression_type(&conditional.consequent)?;
+                let alternate = self.infer_expression_type(&conditional.alternate)?;
+                let result = self.unify_comparable(consequent, alternate)?;
+                if matches!(result, CType::U8Array | CType::U32Array) {
+                    return Err(marked_type_error(
+                        Some(conditional.span),
+                        "conditional expressions cannot select owned typed arrays",
+                    ));
+                }
+                Ok(result)
+            }
             Expression::UnaryExpression(unary) => {
                 let argument_type = self.infer_expression_type(&unary.argument)?;
                 match unary.operator {
@@ -2116,15 +2135,6 @@ impl<'s> CEmitter<'s> {
     }
 
     fn unify_comparable(&self, left: CType, right: CType) -> Result<CType, String> {
-        if left == right {
-            return Ok(left);
-        }
-        if Self::can_assign(left, right) {
-            return Ok(right);
-        }
-        if Self::can_assign(right, left) {
-            return Ok(left);
-        }
         if matches!(left, CType::IntLiteral | CType::FloatLiteral)
             && matches!(right, CType::IntLiteral | CType::FloatLiteral)
         {
@@ -2135,6 +2145,15 @@ impl<'s> CEmitter<'s> {
                     CType::I32
                 },
             );
+        }
+        if left == right {
+            return Ok(left);
+        }
+        if Self::can_assign(left, right) {
+            return Ok(right);
+        }
+        if Self::can_assign(right, left) {
+            return Ok(left);
         }
         Err(format!(
             "incompatible operand types `{left:?}` and `{right:?}`"
@@ -2525,6 +2544,12 @@ impl<'s> CEmitter<'s> {
                     self.expression(&logical.right)?
                 ))
             }
+            Expression::ConditionalExpression(conditional) => Ok(format!(
+                "(({}) ? ({}) : ({}))",
+                self.expression(&conditional.test)?,
+                self.expression(&conditional.consequent)?,
+                self.expression(&conditional.alternate)?
+            )),
             Expression::ParenthesizedExpression(paren) => {
                 Ok(format!("({})", self.expression(&paren.expression)?))
             }
@@ -3423,6 +3448,27 @@ mod tests {
         let error = lower(source).expect_err("division result must not silently narrow to u32");
         assert!(
             error.contains("expected `U32`, got `F64`"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn conditional_expressions_require_boolean_tests_and_compatible_branches() {
+        let source = "function main(): i32 { const choose: bool = true; const value: i32 = choose ? 7 : 9; return value; }";
+        let generated = lower(source).expect("typed conditional expressions should lower");
+        assert!(generated.contains("((choose) ? (7) : (9))"));
+
+        let source = "function main(): i32 { const choose: i32 = 1; const value: i32 = choose ? 7 : 9; return value; }";
+        let error = lower(source).expect_err("conditional test must be boolean");
+        assert!(
+            error.contains("test must be boolean"),
+            "unexpected error: {error}"
+        );
+
+        let source = "function main(): i32 { const choose: bool = true; const value: i32 = choose ? 7 : \"nine\"; return value; }";
+        let error = lower(source).expect_err("conditional branches must have compatible types");
+        assert!(
+            error.contains("incompatible operand types"),
             "unexpected error: {error}"
         );
     }
