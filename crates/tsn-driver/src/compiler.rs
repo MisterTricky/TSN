@@ -1238,6 +1238,8 @@ impl<'s> CEmitter<'s> {
          static inline __attribute__((unused)) int64_t tsn_i64_from_bits(uint64_t bits) { int64_t result; memcpy(&result, &bits, sizeof(result)); return result; }\n\
          static inline __attribute__((unused)) int8_t tsn_i8_post_inc(int8_t *value) { int8_t old = *value; *value = tsn_i8_wrap((int32_t)old + 1); return old; }\n\
          static inline __attribute__((unused)) int16_t tsn_i16_post_inc(int16_t *value) { int16_t old = *value; *value = tsn_i16_wrap((int32_t)old + 1); return old; }\n\
+         static inline __attribute__((unused)) int8_t tsn_i8_post_dec(int8_t *value) { int8_t old = *value; *value = tsn_i8_wrap((int32_t)old - 1); return old; }\n\
+         static inline __attribute__((unused)) int16_t tsn_i16_post_dec(int16_t *value) { int16_t old = *value; *value = tsn_i16_wrap((int32_t)old - 1); return old; }\n\
          typedef struct TsnByteArray { uint32_t len; uint8_t *data; struct TsnByteArray *next; } TsnByteArray;\n\
          typedef struct TsnWordArray { uint32_t len; uint32_t *data; struct TsnWordArray *next; } TsnWordArray;\n\
          typedef struct { uint32_t len; const uint8_t *data; } TsnString;\n\
@@ -2726,9 +2728,6 @@ impl<'s> CEmitter<'s> {
                 else {
                     return Err("only local-variable increment is supported".into());
                 };
-                if update.operator != oxc_syntax::operator::UpdateOperator::Increment {
-                    return Err("decrement is unsupported".into());
-                }
                 let name = id.name.as_str();
                 let Some(local) = self.local(name) else {
                     return Err(format!("unknown local `{name}`"));
@@ -2749,18 +2748,31 @@ impl<'s> CEmitter<'s> {
                 ) {
                     return Err(format!("increment requires an integer local, got `{name}`"));
                 }
+                let (operator, helper_suffix) = match update.operator {
+                    oxc_syntax::operator::UpdateOperator::Increment => ("+", "inc"),
+                    oxc_syntax::operator::UpdateOperator::Decrement => ("-", "dec"),
+                };
                 match local.ty {
-                    CType::I8 if update.prefix => Ok(format!(
-                        "{} = tsn_i8_wrap((int32_t){} + 1)",
-                        id.name, id.name
-                    )),
-                    CType::I16 if update.prefix => Ok(format!(
-                        "{} = tsn_i16_wrap((int32_t){} + 1)",
-                        id.name, id.name
-                    )),
-                    CType::I8 => Ok(format!("tsn_i8_post_inc(&{})", id.name)),
-                    CType::I16 => Ok(format!("tsn_i16_post_inc(&{})", id.name)),
-                    _ => Ok(format!("{}++", id.name)),
+                    CType::I8 | CType::I16 if update.prefix => {
+                        let wrap = if local.ty == CType::I8 {
+                            "tsn_i8_wrap"
+                        } else {
+                            "tsn_i16_wrap"
+                        };
+                        Ok(format!("{name} = {wrap}((int32_t){name} {operator} 1)"))
+                    }
+                    CType::I8 | CType::I16 => {
+                        let helper = if local.ty == CType::I8 {
+                            format!("tsn_i8_post_{helper_suffix}")
+                        } else {
+                            format!("tsn_i16_post_{helper_suffix}")
+                        };
+                        Ok(format!("{helper}(&{name})"))
+                    }
+                    _ if update.prefix && helper_suffix == "inc" => Ok(format!("(++{name})")),
+                    _ if update.prefix => Ok(format!("(--{name})")),
+                    _ if helper_suffix == "inc" => Ok(format!("({name}++)")),
+                    _ => Ok(format!("({name}--)")),
                 }
             }
             _ => Err(format!("unsupported expression in M1: {expression:?}")),

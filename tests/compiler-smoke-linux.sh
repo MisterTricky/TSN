@@ -86,6 +86,13 @@ if [[ "$conditional_output" != "7" ]]; then
   exit 1
 fi
 
+"$compiler" compile "$root/examples/prefix-postfix-update.ts" -o "$out/prefix-postfix-update"
+update_output=$("$out/prefix-postfix-update")
+if [[ "$update_output" != $'4\n6\n6\n4\n4' ]]; then
+  echo "unexpected prefix/postfix update output: $update_output" >&2
+  exit 1
+fi
+
 "$compiler" compile "$root/examples/stdlib-bytes.ts" -o "$out/stdlib-bytes"
 stdlib_bytes_output=$("$out/stdlib-bytes")
 if [[ "$stdlib_bytes_output" != "3289118412" ]]; then
