@@ -1,0 +1,17 @@
+[package]
+name = "tsn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oxc_allocator = "0.160.0"
+oxc_ast = "0.160.0"
+oxc_parser = "0.160.0"
+oxc_span = "0.160.0"
+oxc_syntax = "0.160.0"
+serde_json = "1"
+
+[[bin]]
+name = "tsn"
+path = "src/main.rs"

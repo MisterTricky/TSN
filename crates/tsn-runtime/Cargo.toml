@@ -1,0 +1,8 @@
+[package]
+name = "tsn-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Safe bounded HTTP/1.1 request parsing foundation for tsn"
+
+[dependencies]
