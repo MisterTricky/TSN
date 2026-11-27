@@ -18,7 +18,7 @@ because Oxc can parse its syntax.
 | Integer semantics | Unsigned arithmetic wraps by C definition; i8/i16 arithmetic explicitly wraps through unsigned bit representations; Clang uses `-fwrapv` for i32/i64 arithmetic; trapping debug overflow mode is not implemented; shifts are restricted to u32/u64 and mask the shift count |
 | `let` / `const` | Initialized local bindings; const reassignment/increment rejected; block shadowing supported |
 | Control flow | Lexical blocks, `if`/`else`, `for`, `while`, `do`/`while`, unlabeled `break`/`continue` with cleanup; labels and several productions remain unsupported |
-| Expressions | Numeric/boolean literals, locals, `+ - *`, selected bitwise ops, `>>>`, relational/equality and logical conditions, declared function calls, `Math.imul`, assignment, `++` |
+| Expressions | Numeric/boolean/string literals, locals, `+ - * /` (division promotes both numeric operands to `f64`), selected bitwise ops, `>>>`, relational/equality and logical conditions, declared function calls, `Math.imul`, simple assignment, `++`; remainder/exponentiation, compound assignment, conditional expressions, and many documented expressions remain unsupported |
 | Typed arrays | Zero-initialized `Uint8Array` and `Uint32Array`, checked get/set, `.length`, compiler-generated cleanup on block/function exits; borrowed parameters are supported but cannot be returned or retained; aliases/rebinding, returns, and `for`-initializer declarations remain rejected |
 | General arrays / slices / generic collections | Not implemented |
 | Strings | UTF-8 literal/views, byte-based `.length`, content equality, checked `sliceUtf8`/`stringByteAt`, `printString`, concatenation, and source-level `stdlib/strings.ts::contains`; concatenated bytes are process-owned and released at standalone exit/trap, not yet request-scoped; builders and broad string APIs are absent |
@@ -48,18 +48,31 @@ Current diagnostic categories: `TSN1000` parser, `TSN1301` loose equality,
 `TSN900x` toolchain/I/O errors. These are initial stable categories;
 fine-grained codes and fix-it suggestions remain on the DX backlog.
 
-## Near-term completion order
+## Near-term v0 compiler completion order
 
-1. **Complete source typechecking:** close remaining operator/conversion gaps;
-   C diagnostics must remain a backend sanity check, not tsn's semantic
-   definition.
-2. **Buffer correctness and scopes:** checked indexing and lexical cleanup are
-   present; a Linux smoke test verifies main-boundary recovery. Add leak tests,
-   typed error propagation, and per-request scopes before server use.
-3. **Core DX:** fine-grained grammar diagnostic codes, suggestions/fix-its,
-   negative/differential tests, and generated-IR snapshots.
-4. **Server stdlib:** replace benchmark-only `tsn:bench` hooks with ordinary
-   `tsn:fmt`/`tsn:io`, then add networking packages, with Go's stdlib as the
-   completeness/consistency reference.
+HTTP/M5 work is not the current priority. Close compiler gaps against
+`TYPES.md`, `GRAMMAR.md`, and `PLAN.md` in dependency order:
+
+1. **Semantic completeness:** introduce/finish an explicit source analysis
+   result so every accepted AST expression and statement has a checked type and
+   every unsupported production is rejected with a source span before C
+   emission. C diagnostics must be a backend check, not the language's type
+   checker.
+2. **Core scalar semantics:** complete documented numeric operators and
+   conversions, assignment/update rules, booleans, and function/call checking;
+   add positive execution tests and negative diagnostics for each rule.
+3. **Usable language structures:** implement the v0-supported records/objects,
+   arrays, tuples/unions, and generic functions, or explicitly resolve any
+   draft items that are outside the agreed v0 contract before claiming v0.
+4. **Control flow and modules:** complete documented statements, definite
+   return/assignment analysis, import/export validation, and source-mapped
+   diagnostics.
+5. **Memory and errors:** implement the agreed v0 ownership/scope and error
+   semantics with escape and cleanup tests; then handle async only if it remains
+   in the v0 acceptance contract.
+6. **Conformance gate:** run a checked-in positive/negative language corpus,
+   differential tests for shared TS behavior, workspace quality checks, and
+   standalone Linux execution tests. Do not infer v0 completion from the M1/M3
+   performance or server fixtures.
 
 Pointers remain explicitly deferred. This does not block the above work.

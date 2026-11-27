@@ -1846,6 +1846,10 @@ impl<'s> CEmitter<'s> {
                 let left = self.infer_expression_type(&binary.left)?;
                 let right = self.infer_expression_type(&binary.right)?;
                 match binary.operator {
+                    BinaryOperator::Division => {
+                        self.unify_numeric(left, right, false)?;
+                        Ok(CType::F64)
+                    }
                     BinaryOperator::Addition
                     | BinaryOperator::Subtraction
                     | BinaryOperator::Multiplication => {
@@ -2432,6 +2436,11 @@ impl<'s> CEmitter<'s> {
                 }
             }
             Expression::BinaryExpression(binary) => {
+                if binary.operator == BinaryOperator::Division {
+                    let left = self.expression(&binary.left)?;
+                    let right = self.expression(&binary.right)?;
+                    return Ok(format!("((double)({left}) / (double)({right}))"));
+                }
                 if matches!(
                     binary.operator,
                     BinaryOperator::StrictEquality | BinaryOperator::StrictInequality
@@ -3400,6 +3409,20 @@ mod tests {
             lower(source).expect_err("mixed numeric arithmetic needs an explicit conversion");
         assert!(
             error.contains("incompatible operand types"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn integer_division_promotes_operands_and_result_to_f64() {
+        let source = "function main(): i32 { const result: f64 = 7 / 2; return 0; }";
+        let generated = lower(source).expect("numeric division is part of the v0 scalar contract");
+        assert!(generated.contains("((double)(7) / (double)(2))"));
+
+        let source = "function main(): i32 { const result: u32 = 7 / 2; return 0; }";
+        let error = lower(source).expect_err("division result must not silently narrow to u32");
+        assert!(
+            error.contains("expected `U32`, got `F64`"),
             "unexpected error: {error}"
         );
     }

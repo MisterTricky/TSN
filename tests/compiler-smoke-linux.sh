@@ -72,6 +72,13 @@ if [[ "$print_numbers_output" != $'-7\n3.5' ]]; then
   exit 1
 fi
 
+"$compiler" compile "$root/examples/division.ts" -o "$out/division"
+division_output=$("$out/division")
+if [[ "$division_output" != $'3.5\n-3.5' ]]; then
+  echo "unexpected division output: $division_output" >&2
+  exit 1
+fi
+
 "$compiler" compile "$root/examples/stdlib-bytes.ts" -o "$out/stdlib-bytes"
 stdlib_bytes_output=$("$out/stdlib-bytes")
 if [[ "$stdlib_bytes_output" != "3289118412" ]]; then
