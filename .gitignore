@@ -1,0 +1,4 @@
+/target/
+/benchmarks/byte-kernel/kernel-c
+/benchmarks/byte-kernel/kernel-tsn
+/benchmarks/byte-kernel/results/
